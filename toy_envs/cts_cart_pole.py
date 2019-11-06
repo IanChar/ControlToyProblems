@@ -60,7 +60,10 @@ class CtsCartPoleEnv(gym.Env):
         'video.frames_per_second' : 50
     }
 
-    def __init__(self):
+    def __init__(self, discrete_acts=None, immediate_reward=False):
+        """Constructor.
+        discrete_states: Number of discretizations to make for action space.
+        """
         self.gravity = 9.8
         self.masscart = 1.0
         self.masspole = 0.1
@@ -69,6 +72,8 @@ class CtsCartPoleEnv(gym.Env):
         self.polemass_length = (self.masspole * self.length)
         self.tau = 0.02  # seconds between state updates
         self.kinematics_integrator = 'euler'
+        self.time = 0
+        self.immediate_reward = immediate_reward
 
         # Angle at which to fail the episode
         self.theta_threshold_radians = 12 * 2 * math.pi / 360
@@ -83,7 +88,13 @@ class CtsCartPoleEnv(gym.Env):
             np.finfo(np.float32).max])
         max_force = np.asarray([10.0])
 
-        self.action_space = spaces.Box(-max_force, max_force, dtype=np.float32)
+        if discrete_acts is not None:
+            self.acts_are_discrete = True
+            self.act_map = np.linspace(-max_force, max_force, discrete_acts)
+            self.action_space = spaces.Discrete(discrete_acts)
+        else:
+            self.acts_are_discrete = False
+            self.action_space = spaces.Box(-max_force, max_force, dtype=np.float32)
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
         self.seed()
@@ -100,7 +111,7 @@ class CtsCartPoleEnv(gym.Env):
         assert self.action_space.contains(action), "%r (%s) invalid"%(action, type(action))
         state = self.state
         x, x_dot, theta, theta_dot = state
-        force = action
+        force = self.act_map[action] if self.acts_are_discrete else action
         costheta = math.cos(theta)
         sintheta = math.sin(theta)
         temp = (force + self.polemass_length * theta_dot * theta_dot * sintheta) / self.total_mass
@@ -117,27 +128,36 @@ class CtsCartPoleEnv(gym.Env):
             theta_dot = theta_dot + self.tau * thetaacc
             theta = theta + self.tau * theta_dot
         self.state = (x,x_dot,theta,theta_dot)
+        self.time += 1
         done =  x < -self.x_threshold \
                 or x > self.x_threshold \
                 or theta < -self.theta_threshold_radians \
-                or theta > self.theta_threshold_radians
+                or theta > self.theta_threshold_radians \
+                or self.time > 500
         done = bool(done)
 
-        if not done:
-            reward = 1.0
-        elif self.steps_beyond_done is None:
-            # Pole just fell!
-            self.steps_beyond_done = 0
-            reward = 1.0
+        if self.immediate_reward:
+            # The immediate reward function.
+            coefs = np.asarray([-1./10, -1, -10, -1.])
+            state_vec = np.asarray(self.state)
+            reward = np.exp(np.dot(coefs, state_vec ** 2))
         else:
-            if self.steps_beyond_done == 0:
-                logger.warn("You are calling 'step()' even though this environment has already returned done = True. You should always call 'reset()' once you receive 'done = True' -- any further steps are undefined behavior.")
-            self.steps_beyond_done += 1
-            reward = 0.0
+            if not done:
+                reward = 1.0
+            elif self.steps_beyond_done is None:
+                # Pole just fell!
+                self.steps_beyond_done = 0
+                reward = 1.0
+            else:
+                if self.steps_beyond_done == 0:
+                    logger.warn("You are calling 'step()' even though this environment has already returned done = True. You should always call 'reset()' once you receive 'done = True' -- any further steps are undefined behavior.")
+                self.steps_beyond_done += 1
+                reward = 0.0
 
         return np.array(self.state), reward, done, {}
 
     def reset(self):
+        self.time = 0
         self.state = self.np_random.uniform(low=-0.05, high=0.05, size=(4,))
         self.steps_beyond_done = None
         return np.array(self.state)

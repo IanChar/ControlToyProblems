@@ -11,7 +11,6 @@ import gym
 from gym import wrappers, logger
 
 import os
-print os.getcwd()
 sys.path.append('..')
 from toy_envs import all_envs
 
@@ -37,16 +36,19 @@ if __name__ == '__main__':
     env.seed(0)
     agent = RandomAgent(env.action_space)
 
-    episode_count = 2
+    episode_count = 10
     reward = 0
     done = False
 
     for i in range(episode_count):
         ob = env.reset()
+        cum_reward = 0
         while True:
             action = agent.act(ob, reward, done)
             ob, reward, done, _ = env.step(action)
+            cum_reward += reward
             env.render()
             if done:
                 break
+        print('Cumulative Episode Score: %f' % cum_reward)
     env.close()
